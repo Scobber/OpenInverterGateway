@@ -461,6 +461,8 @@ void setup()
     httpServer.on("/metrics", sendMetrics);
     httpServer.on("/startAp", startConfigAccessPoint);
     httpServer.on("/reboot", rebootESP);
+    httpServer.on("/startModbusProxy", startModbusProxy);
+    httpServer.on("/stopModbusProxy", stopModbusProxy);
     #if ENABLE_MODBUS_COMMUNICATION == 1
     httpServer.on("/postCommunicationModbus", sendPostSite);
     httpServer.on("/postCommunicationModbus_p", HTTP_POST, handlePostData);
@@ -474,9 +476,7 @@ void setup()
     Inverter.InitProtocol();
     InverterReconnect();
     httpServer.begin();
-    #if MODBUS_TCP_PROXY == 1
-        ModbusTcpProxySetup();
-    #endif
+    ModbusTcpProxySetup();
 
     #if defined(DEFAULT_NTP_SERVER) && defined(DEFAULT_TZ_INFO)
         #ifdef ESP32
@@ -621,6 +621,16 @@ void rebootESP(void) {
     httpServer.send(200, F("text/html"), F("<html><body>Rebooting...</body></html>"));
     delay(2000);
     ESP.restart();
+}
+
+void startModbusProxy(void) {
+    ModbusTcpProxyStart();
+    httpServer.send(200, F("text/html"), F("<html><body>Modbus proxy started</body></html>"));
+}
+
+void stopModbusProxy(void) {
+    ModbusTcpProxyStop();
+    httpServer.send(200, F("text/html"), F("<html><body>Modbus proxy stopped</body></html>"));
 }
 
 #ifdef ENABLE_WEB_DEBUG
@@ -851,9 +861,7 @@ void loop()
     #endif
 
     httpServer.handleClient();
-    #if MODBUS_TCP_PROXY == 1
-        ModbusTcpProxyLoop();
-    #endif
+    ModbusTcpProxyLoop();
 
     // Toggle green LED with 1 Hz (alive)
     // ------------------------------------------------------------

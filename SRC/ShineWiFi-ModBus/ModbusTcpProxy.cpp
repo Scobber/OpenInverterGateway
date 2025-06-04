@@ -1,5 +1,4 @@
 #include "ModbusTcpProxy.h"
-#if MODBUS_TCP_PROXY == 1
 #include <TLog.h>
 
 #ifdef ESP8266
@@ -9,12 +8,15 @@
 #endif
 
 static WiFiServer modbusServer(MODBUS_TCP_PORT);
+bool modbusTcpProxyRunning = (MODBUS_TCP_PROXY == 1);
 
 extern Growatt Inverter;
 
 void ModbusTcpProxySetup() {
-  modbusServer.begin();
-  Log.println(F("Modbus TCP proxy started"));
+  if (modbusTcpProxyRunning) {
+    modbusServer.begin();
+    Log.println(F("Modbus TCP proxy started"));
+  }
 }
 
 static void sendException(WiFiClient &client, uint16_t transId, uint8_t unitId,
@@ -112,6 +114,7 @@ static void handleClient(WiFiClient &client) {
 }
 
 void ModbusTcpProxyLoop() {
+  if (!modbusTcpProxyRunning) return;
   WiFiClient client = modbusServer.available();
   if (client) {
     handleClient(client);
@@ -121,4 +124,20 @@ void ModbusTcpProxyLoop() {
   }
 }
 
-#endif
+void ModbusTcpProxyStart() {
+  if (!modbusTcpProxyRunning) {
+    modbusServer.begin();
+    modbusTcpProxyRunning = true;
+    Log.println(F("Modbus TCP proxy started"));
+  }
+}
+
+void ModbusTcpProxyStop() {
+  if (modbusTcpProxyRunning) {
+    modbusServer.close();
+    modbusTcpProxyRunning = false;
+    Log.println(F("Modbus TCP proxy stopped"));
+  }
+}
+
+bool ModbusTcpProxyIsRunning() { return modbusTcpProxyRunning; }

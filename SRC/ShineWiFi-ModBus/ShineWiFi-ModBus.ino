@@ -62,6 +62,10 @@ byte btnPressed = 0;
 
 #define NUM_OF_RETRIES 5
 boolean readoutSucceeded = false;
+static bool inputRegAlive[125];
+static uint8_t inputRegFails[125];
+static bool holdingRegAlive[10];
+static uint8_t holdingRegFails[10];
 
 uint16_t u16PacketCnt = 0;
 #if PINGER_SUPPORTED == 1
@@ -459,6 +463,7 @@ void setup()
     httpServer.on("/status", sendJsonSite);
     httpServer.on("/uiStatus", sendUiJsonSite);
     httpServer.on("/metrics", sendMetrics);
+    httpServer.on("/registers", sendRegisterTable);
     httpServer.on("/startAp", startConfigAccessPoint);
     httpServer.on("/reboot", rebootESP);
     httpServer.on("/startModbusProxy", startModbusProxy);
@@ -648,6 +653,144 @@ void sendMainPage(void)
 void sendPostSite(void)
 {
     httpServer.send(200, "text/html", SendPostSite_page);
+}
+
+static void updateRegisterHealth()
+{
+    for (int i = 0; i < Inverter._Protocol.InputRegisterCount; ++i)
+    {
+        if (!inputRegAlive[i] && inputRegFails[i] >= 3)
+            continue;
+
+        bool ok = false;
+        uint32_t val32;
+        uint16_t val16;
+        if (Inverter._Protocol.InputRegisters[i].size == SIZE_16BIT ||
+            Inverter._Protocol.InputRegisters[i].size == SIZE_16BIT_S)
+        {
+            ok = Inverter.ReadInputReg(Inverter._Protocol.InputRegisters[i].address,
+                                        &val16);
+            if (ok)
+                Inverter._Protocol.InputRegisters[i].value = val16;
+        }
+        else
+        {
+            ok = Inverter.ReadInputReg(Inverter._Protocol.InputRegisters[i].address,
+                                        &val32);
+            if (ok)
+                Inverter._Protocol.InputRegisters[i].value = val32;
+        }
+
+        if (ok)
+        {
+            inputRegAlive[i] = true;
+            inputRegFails[i] = 0;
+        }
+        else
+        {
+            if (inputRegFails[i] < 0xFF)
+                inputRegFails[i]++;
+            if (inputRegFails[i] >= 3)
+                inputRegAlive[i] = false;
+        }
+    }
+
+    for (int i = 0; i < Inverter._Protocol.HoldingRegisterCount; ++i)
+    {
+        if (!holdingRegAlive[i] && holdingRegFails[i] >= 3)
+            continue;
+
+        bool ok = false;
+        uint32_t val32;
+        uint16_t val16;
+        if (Inverter._Protocol.HoldingRegisters[i].size == SIZE_16BIT ||
+            Inverter._Protocol.HoldingRegisters[i].size == SIZE_16BIT_S)
+        {
+            ok = Inverter.ReadHoldingReg(
+                Inverter._Protocol.HoldingRegisters[i].address, &val16);
+            if (ok)
+                Inverter._Protocol.HoldingRegisters[i].value = val16;
+        }
+        else
+        {
+            ok = Inverter.ReadHoldingReg(
+                Inverter._Protocol.HoldingRegisters[i].address, &val32);
+            if (ok)
+                Inverter._Protocol.HoldingRegisters[i].value = val32;
+        }
+
+        if (ok)
+        {
+            holdingRegAlive[i] = true;
+            holdingRegFails[i] = 0;
+        }
+        else
+        {
+            if (holdingRegFails[i] < 0xFF)
+                holdingRegFails[i]++;
+            if (holdingRegFails[i] >= 3)
+                holdingRegAlive[i] = false;
+        }
+    }
+}
+
+void sendRegisterTable(void)
+{
+    if (!readoutSucceeded)
+    {
+        httpServer.send(503, F("text/plain"), F("Service Unavailable"));
+        return;
+    }
+
+    updateRegisterHealth();
+
+    String page;
+    page.reserve(12000);
+    page += F("<html><body><table border='1'>");
+    page += F("<tr><th>Type</th><th>Address</th><th>Name</th><th>Value (hex)</th><th>Status</th></tr>");
+
+    for (int i = 0; i < Inverter._Protocol.InputRegisterCount; i++)
+    {
+        const sGrowattModbusReg_t &reg = Inverter._Protocol.InputRegisters[i];
+        page += F("<tr><td>I</td><td>");
+        page += String(reg.address);
+        page += F("</td><td>");
+        page += String(reg.name);
+        page += F("</td><td>");
+        char buf[9];
+        if (reg.size == SIZE_16BIT || reg.size == SIZE_16BIT_S)
+            snprintf(buf, sizeof(buf), "%04X", (uint16_t)reg.value);
+        else
+            snprintf(buf, sizeof(buf), "%08X", reg.value);
+        page += buf;
+        page += F("</td><td>");
+        page += inputRegAlive[i] ? F("alive") : F("dead");
+        page += F("</td></tr>");
+    }
+
+    for (int i = 0; i < Inverter._Protocol.HoldingRegisterCount; i++)
+    {
+        const sGrowattModbusReg_t &reg = Inverter._Protocol.HoldingRegisters[i];
+        page += F("<tr><td>H</td><td>");
+        page += String(reg.address);
+        page += F("</td><td>");
+        page += String(reg.name);
+        page += F("</td><td>");
+        char buf[9];
+        if (reg.size == SIZE_16BIT || reg.size == SIZE_16BIT_S)
+            snprintf(buf, sizeof(buf), "%04X", (uint16_t)reg.value);
+        else
+            snprintf(buf, sizeof(buf), "%08X", reg.value);
+        page += buf;
+        page += F("</td><td>");
+        page += holdingRegAlive[i] ? F("alive") : F("dead");
+        page += F("</td></tr>");
+    }
+
+    page += F("</table></body></html>");
+
+    httpServer.setContentLength(page.length());
+    httpServer.send(200, "text/html", page);
 }
 
 #ifdef ESP8266
